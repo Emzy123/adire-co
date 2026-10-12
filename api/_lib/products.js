@@ -3,13 +3,7 @@
  * The server never trusts prices, subtotals, or delivery fees sent from the browser.
  */
 
-export interface ServerProduct {
-  id: string;
-  name: string;
-  price: number; // in Nigerian Naira (₦)
-}
-
-export const PRODUCTS: Record<string, ServerProduct> = {
+export const PRODUCTS = {
   '1': {
     id: '1',
     name: 'Classic Indigo Adire Fabric (2 yards)',
@@ -54,37 +48,20 @@ export const PRODUCTS: Record<string, ServerProduct> = {
 
 export const LAGOS_DELIVERY_FEE_NAIRA = 2500;
 
-export interface CartItemInput {
-  id: string;
-  quantity: number;
-}
-
-export interface ComputedOrderPrice {
-  items: Array<{
-    id: string;
-    name: string;
-    quantity: number;
-    price: number;
-    lineTotal: number;
-  }>;
-  subtotalNaira: number;
-  deliveryFeeNaira: number;
-  totalNaira: number;
-  totalKobo: number;
-}
-
 /**
  * Validates cart items, verifies IDs exist, validates quantities (1-20 integer),
  * looks up prices from the server catalog, adds the ₦2,500 Lagos delivery fee,
  * and computes authoritative total in Naira and kobo.
+ *
+ * @param {Array<{id: string, quantity: number}>} items
  */
-export function computeOrderTotal(items: CartItemInput[]): ComputedOrderPrice {
+export function computeOrderTotal(items) {
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error('Order must contain at least one item');
   }
 
   let subtotal = 0;
-  const validatedItems: ComputedOrderPrice['items'] = [];
+  const validatedItems = [];
 
   for (const item of items) {
     const id = String(item?.id || '').trim();

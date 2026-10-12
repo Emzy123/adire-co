@@ -1,32 +1,48 @@
 /**
  * Adire & Co - Store Owner Order Notification via Resend
+ * Fully error-isolated: never throws uncaught exceptions.
  */
 
 import { Resend } from 'resend';
-import { StoredOrder } from './orderStore';
 
-function getResendClient(): Resend | null {
+function getResendClient() {
   const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return null;
-  return new Resend(apiKey);
+  if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length === 0) {
+    return null;
+  }
+  try {
+    return new Resend(apiKey.trim());
+  } catch (err) {
+    console.warn('[email] Failed to initialize Resend:', err?.message || err);
+    return null;
+  }
 }
 
 /**
  * Sends a notification email to the store owner when an order is confirmed paid.
+ * @param {object} order
+ * @returns {Promise<{ success: boolean, id?: string }>}
  */
-export async function sendOrderPaidEmail(order: StoredOrder): Promise<{ success: boolean; id?: string }> {
+export async function sendOrderPaidEmail(order) {
+  if (!order) return { success: false };
+
   const resend = getResendClient();
-  const recipient = process.env.ORDER_NOTIFICATION_EMAIL || process.env.STORE_EMAIL || 'orders@adireandco.com';
+  const recipient = process.env.ORDER_NOTIFICATION_EMAIL || 'orders@adireandco.com';
   const fromEmail = process.env.RESEND_FROM_EMAIL || 'Adire & Co Orders <onboarding@resend.dev>';
 
-  const itemsHtml = order.items
+  if (!resend) {
+    console.log('[email] RESEND_API_KEY not configured. Skipping email notification for order:', order.reference);
+    return { success: true };
+  }
+
+  const itemsHtml = (order.items || [])
     .map(
       (item, idx) =>
         `<tr>
           <td style="padding: 8px; border-bottom: 1px solid #eee;">${idx + 1}. ${item.name}</td>
           <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
-          <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">₦${item.price.toLocaleString()}</td>
-          <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold;">₦${item.lineTotal.toLocaleString()}</td>
+          <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">₦${Number(item.price).toLocaleString()}</td>
+          <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold;">₦${Number(item.lineTotal).toLocaleString()}</td>
         </tr>`
     )
     .join('');
@@ -41,7 +57,7 @@ export async function sendOrderPaidEmail(order: StoredOrder): Promise<{ success:
       <div style="padding: 20px 0;">
         <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px;">
           <p style="margin: 0; color: #166534; font-weight: bold; font-size: 15px;">
-            Payment Verified: ₦${order.totalNaira.toLocaleString()}
+            Payment Verified: ₦${Number(order.totalNaira).toLocaleString()}
           </p>
           <p style="margin: 4px 0 0 0; color: #15803d; font-size: 13px;">
             Reference: <span style="font-family: monospace; font-weight: bold;">${order.reference}</span>
@@ -50,11 +66,11 @@ export async function sendOrderPaidEmail(order: StoredOrder): Promise<{ success:
 
         <h3 style="color: #0f172a; margin: 0 0 10px 0; font-size: 16px;">Customer Details:</h3>
         <table style="width: 100%; font-size: 13px; margin-bottom: 20px;">
-          <tr><td style="width: 130px; color: #64748b;">Full Name:</td><td><strong>${order.customer.fullName}</strong></td></tr>
-          <tr><td style="color: #64748b;">Phone:</td><td><a href="tel:${order.customer.phone}" style="color: #1F3A93; text-decoration: none;">${order.customer.phone}</a></td></tr>
-          <tr><td style="color: #64748b;">Email:</td><td>${order.customer.email || 'N/A'}</td></tr>
-          <tr><td style="color: #64748b;">Delivery Address:</td><td>${order.customer.address}</td></tr>
-          ${order.customer.note ? `<tr><td style="color: #64748b;">Order Note:</td><td><em>"${order.customer.note}"</em></td></tr>` : ''}
+          <tr><td style="width: 130px; color: #64748b;">Full Name:</td><td><strong>${order.customer?.fullName || 'N/A'}</strong></td></tr>
+          <tr><td style="color: #64748b;">Phone:</td><td><a href="tel:${order.customer?.phone}" style="color: #1F3A93; text-decoration: none;">${order.customer?.phone || 'N/A'}</a></td></tr>
+          <tr><td style="color: #64748b;">Email:</td><td>${order.customer?.email || 'N/A'}</td></tr>
+          <tr><td style="color: #64748b;">Delivery Address:</td><td>${order.customer?.address || 'N/A'}</td></tr>
+          ${order.customer?.note ? `<tr><td style="color: #64748b;">Order Note:</td><td><em>"${order.customer.note}"</em></td></tr>` : ''}
         </table>
 
         <h3 style="color: #0f172a; margin: 0 0 10px 0; font-size: 16px;">Order Items:</h3>
@@ -75,15 +91,15 @@ export async function sendOrderPaidEmail(order: StoredOrder): Promise<{ success:
         <div style="border-top: 2px solid #e2e8f0; padding-top: 10px; font-size: 13px;">
           <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
             <span style="color: #64748b;">Subtotal:</span>
-            <span>₦${order.subtotalNaira.toLocaleString()}</span>
+            <span>₦${Number(order.subtotalNaira).toLocaleString()}</span>
           </div>
           <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
             <span style="color: #64748b;">Lagos Delivery Fee:</span>
-            <span>₦${order.deliveryFeeNaira.toLocaleString()}</span>
+            <span>₦${Number(order.deliveryFeeNaira).toLocaleString()}</span>
           </div>
           <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; color: #1F3A93; border-top: 1px solid #e2e8f0; padding-top: 8px;">
             <span>Total Paid:</span>
-            <span>₦${order.totalNaira.toLocaleString()}</span>
+            <span>₦${Number(order.totalNaira).toLocaleString()}</span>
           </div>
         </div>
       </div>
@@ -94,27 +110,22 @@ export async function sendOrderPaidEmail(order: StoredOrder): Promise<{ success:
     </div>
   `;
 
-  if (!resend) {
-    console.log('[email] RESEND_API_KEY is not set. Order notification email skipped. Order Reference:', order.reference);
-    return { success: true };
-  }
-
   try {
     const { data, error } = await resend.emails.send({
       from: fromEmail,
       to: [recipient],
-      subject: `New Paid Order (${order.reference}) - ₦${order.totalNaira.toLocaleString()} from ${order.customer.fullName}`,
+      subject: `New Paid Order (${order.reference}) - ₦${Number(order.totalNaira).toLocaleString()} from ${order.customer?.fullName || 'Customer'}`,
       html: emailHtml,
     });
 
     if (error) {
-      console.error('[email] Resend send error:', error);
+      console.warn('[email] Resend send error:', error);
       return { success: false };
     }
 
     return { success: true, id: data?.id };
   } catch (err) {
-    console.error('[email] Error sending email via Resend:', err);
+    console.warn('[email] Error sending email via Resend:', err?.message || err);
     return { success: false };
   }
 }

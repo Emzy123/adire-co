@@ -3,4 +3,4 @@ Allow: /
 Disallow: /api/
 Disallow: /confirmation
 
-Sitemap: https://adireandco.com/sitemap.xml
+Sitemap: https://adire-co.vercel.app/sitemap.xml
