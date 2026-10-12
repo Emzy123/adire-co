@@ -1,6 +1,6 @@
 import React from 'react';
 import { STORE_WHATSAPP_LINK } from '../utils/formatters';
-import { MessageCircle, Clock, MapPin, Heart, ShieldCheck, Sparkles } from 'lucide-react';
+import { MessageCircle, Clock, MapPin, Heart, ShieldCheck, Sparkles, Mail } from 'lucide-react';
 
 interface FooterProps {
   onNavigate: (page: string) => void;
@@ -89,15 +89,22 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   <p className="text-xs text-slate-400">9:00 am to 7:00 pm</p>
                 </div>
               </div>
-              <div className="pt-1">
+              <div className="pt-1 flex flex-col gap-2">
                 <a
                   href={STORE_WHATSAPP_LINK}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-xs font-semibold px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition-colors shadow-sm"
+                  className="inline-flex items-center gap-2 text-xs font-semibold px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition-colors shadow-sm w-fit"
                 >
                   <MessageCircle className="w-4 h-4" />
                   <span>WhatsApp: +234 807 471 0080</span>
+                </a>
+                <a
+                  href="mailto:hello@adireandco.com"
+                  className="inline-flex items-center gap-2 text-xs font-semibold px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 transition-colors shadow-sm w-fit"
+                >
+                  <Mail className="w-4 h-4 text-[#4367D8]" />
+                  <span>Email: hello@adireandco.com</span>
                 </a>
               </div>
             </div>

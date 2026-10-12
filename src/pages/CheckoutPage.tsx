@@ -8,8 +8,6 @@ import {
   STORE_WHATSAPP_LINK,
 } from '../utils/formatters';
 import {
-  getPaystackPublicKey,
-  openPaystackPopup,
   initializePaystackApi,
 } from '../services/paystack';
 import {
@@ -49,8 +47,6 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   const [isProcessingPaystack, setIsProcessingPaystack] = useState(false);
   const [paystackErrorMessage, setPaystackErrorMessage] = useState<string | null>(null);
   const [directPaystackUrl, setDirectPaystackUrl] = useState<string | null>(null);
-
-  const paystackKey = getPaystackPublicKey();
 
   const cleanupPaystackIframes = () => {
     document
@@ -161,15 +157,31 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   // Paystack Checkout Handler
   const handlePaystackCheckout = async () => {
     if (!validate()) return;
-    if (!paystackKey) return;
 
     setIsProcessingPaystack(true);
     setPaystackErrorMessage(null);
     setDirectPaystackUrl(null);
 
-    const reference = generateOrderReference();
+    // Call server initialize endpoint with ONLY customer details and cart items [{id, quantity}]
+    const initResult = await initializePaystackApi({
+      customer: formData,
+      items: items.map((i) => ({ id: i.product.id, quantity: i.quantity })),
+    });
+
+    if (!initResult || !initResult.status || !initResult.authorization_url) {
+      setIsProcessingPaystack(false);
+      setPaystackErrorMessage(
+        initResult?.message ||
+          'Could not initialize Paystack payment. You can place your order directly via WhatsApp below.'
+      );
+      return;
+    }
+
+    const { authorization_url, reference } = initResult;
+
+    // Save order in localStorage ONLY for displaying customer receipt on return
     const order: Order = {
-      reference,
+      reference: reference || generateOrderReference(),
       paymentMethod: 'paystack',
       items: [...items],
       subtotal,
@@ -180,86 +192,15 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
       status: 'pending',
     };
 
-    // Save order in localStorage for redirect safety
     try {
       localStorage.setItem('adire_co_last_order', JSON.stringify(order));
     } catch (e) {
       console.error(e);
     }
 
-    // Attempt to initialize via backend server API to get official access_code & authorization_url
-    const initResult = await initializePaystackApi({
-      email: formData.email.trim(),
-      amount: total * 100,
-      reference,
-      customer: formData,
-      items: items.map((i) => ({ id: i.product.id, quantity: i.quantity })),
-    });
-
-    const authUrl = initResult?.data?.authorization_url || null;
-
-    if (authUrl) {
-      setDirectPaystackUrl(authUrl);
-      // Clear cart and redirect directly to Paystack's secure checkout page
-      clearCart();
-      window.location.href = authUrl;
-      return;
-    }
-
-    // Client-side fallback if backend API is not configured
-    try {
-      await openPaystackPopup(
-        {
-          key: paystackKey,
-          email: formData.email.trim(),
-          amount: total * 100, // in kobo
-          currency: 'NGN',
-          ref: reference,
-          metadata: {
-            custom_fields: [
-              {
-                display_name: 'Customer Name',
-                variable_name: 'customer_name',
-                value: formData.fullName,
-              },
-              {
-                display_name: 'Phone',
-                variable_name: 'phone',
-                value: formData.phone,
-              },
-              {
-                display_name: 'Delivery Address',
-                variable_name: 'delivery_address',
-                value: formData.address,
-              },
-              {
-                display_name: 'Order Note',
-                variable_name: 'order_note',
-                value: formData.note || 'None',
-              },
-            ],
-          },
-          onSuccess: (response) => {
-            cleanupPaystackIframes();
-            const finalReference = response.reference || reference;
-            order.reference = finalReference;
-            clearCart();
-            onOrderCompleted(order);
-          },
-          onCancel: () => {
-            cleanupPaystackIframes();
-            setPaystackErrorMessage(
-              'Payment window was closed. You can retry or complete your order via WhatsApp.'
-            );
-          },
-        }
-      );
-    } catch (err: any) {
-      cleanupPaystackIframes();
-      setPaystackErrorMessage(
-        err.message || 'Could not load Paystack checkout. Please complete your order via WhatsApp.'
-      );
-    }
+    setDirectPaystackUrl(authorization_url);
+    clearCart();
+    window.location.href = authorization_url;
   };
 
   if (items.length === 0) {
@@ -489,111 +430,123 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
             </div>
 
             <div className="space-y-4">
-              {/* Option A: Paystack Button or Fallback Notice */}
-              {paystackKey ? (
-                <div className="p-5 rounded-2xl border-2 border-[#1F3A93]/30 bg-[#1F3A93]/5 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-lg bg-[#1F3A93] text-white flex items-center justify-center">
-                        <CreditCard className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold text-slate-900">
-                          Pay Online with Paystack
-                        </h4>
-                        <p className="text-xs text-slate-500">
-                          Debit Card, Bank Transfer, USSD & Apple Pay
+              {/* Option A: Pay Online with Paystack */}
+              <div className="p-5 rounded-2xl border-2 border-[#1F3A93]/30 bg-[#1F3A93]/5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-[#1F3A93] text-white flex items-center justify-center">
+                      <CreditCard className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900">
+                        Pay Online with Paystack
+                      </h4>
+                      <p className="text-xs text-slate-500">
+                        Debit Card, Bank Transfer, USSD & Apple Pay
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
+                    Instant
+                  </span>
+                </div>
+
+                {/* Paystack Error Notice offering WhatsApp Ordering */}
+                {paystackErrorMessage && (
+                  <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2 animate-fade-in">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="font-semibold">{paystackErrorMessage}</p>
+                        <p className="text-[11px] text-amber-700 mt-0.5">
+                          You can easily complete this order directly with our Lagos atelier team via WhatsApp.
                         </p>
                       </div>
                     </div>
-                    <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
-                      Instant
-                    </span>
-                  </div>
-
-                  {/* Direct Paystack URL Fallback / Notice */}
-                  {directPaystackUrl && (
-                    <div className="p-4 rounded-2xl bg-blue-50/90 border border-blue-200 text-xs text-blue-900 space-y-2.5 animate-fade-in shadow-xs">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-start gap-2">
-                          <Sparkles className="w-4 h-4 text-[#1F3A93] shrink-0 mt-0.5" />
-                          <div>
-                            <p className="font-bold">Opening Paystack Payment Page</p>
-                            <p className="text-[11px] text-blue-700 mt-0.5">
-                              Redirecting to Paystack's official secure checkout. If your browser didn't navigate automatically, click below to open it directly:
-                            </p>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={cleanupPaystackIframes}
-                          className="text-blue-400 hover:text-blue-700 p-0.5"
-                          title="Dismiss loader"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2 pt-1">
-                        <a
-                          href={directPaystackUrl}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1F3A93] hover:bg-[#162B6E] text-white font-bold transition-all shadow-sm text-xs"
-                        >
-                          <span>Open Secure Paystack Page</span>
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                        <button
-                          type="button"
-                          onClick={cleanupPaystackIframes}
-                          className="px-3 py-2 rounded-xl bg-white border border-blue-200 text-blue-800 hover:bg-blue-100/50 font-semibold transition-colors text-xs"
-                        >
-                          Cancel / Retry
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={handlePaystackCheckout}
-                      disabled={isProcessingPaystack}
-                      className="flex-1 py-3.5 px-4 rounded-xl bg-[#1F3A93] hover:bg-[#162B6E] disabled:opacity-75 text-white font-bold text-sm shadow-lg shadow-[#1F3A93]/20 flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
+                      onClick={handleWhatsAppCheckout}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors shadow-sm"
                     >
-                      <Lock className="w-4 h-4" />
-                      <span>
-                        {isProcessingPaystack
-                          ? 'Opening Paystack...'
-                          : `Pay ${formatNaira(total)} with Paystack`}
-                      </span>
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      <span>Order via WhatsApp instead</span>
                     </button>
+                  </div>
+                )}
 
-                    {isProcessingPaystack && (
+                {/* Direct Paystack URL Fallback / Notice */}
+                {directPaystackUrl && (
+                  <div className="p-4 rounded-2xl bg-blue-50/90 border border-blue-200 text-xs text-blue-900 space-y-2.5 animate-fade-in shadow-xs">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2">
+                        <Sparkles className="w-4 h-4 text-[#1F3A93] shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-bold">Opening Paystack Payment Page</p>
+                          <p className="text-[11px] text-blue-700 mt-0.5">
+                            Redirecting to Paystack's official secure checkout. If your browser didn't navigate automatically, click below to open it directly:
+                          </p>
+                        </div>
+                      </div>
                       <button
                         type="button"
                         onClick={cleanupPaystackIframes}
-                        className="py-3.5 px-3 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold transition-colors"
-                        title="Cancel loader"
+                        className="text-blue-400 hover:text-blue-700 p-0.5"
+                        title="Dismiss loader"
                       >
-                        Cancel
+                        <X className="w-4 h-4" />
                       </button>
-                    )}
-                  </div>
+                    </div>
 
-                  <p className="text-[11px] text-slate-400 text-center">
-                    Secured with 256-bit encryption by Paystack.
-                  </p>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <a
+                        href={directPaystackUrl}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1F3A93] hover:bg-[#162B6E] text-white font-bold transition-all shadow-sm text-xs"
+                      >
+                        <span>Open Secure Paystack Page</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                      <button
+                        type="button"
+                        onClick={cleanupPaystackIframes}
+                        className="px-3 py-2 rounded-xl bg-white border border-blue-200 text-blue-800 hover:bg-blue-100/50 font-semibold transition-colors text-xs"
+                      >
+                        Cancel / Retry
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handlePaystackCheckout}
+                    disabled={isProcessingPaystack}
+                    className="flex-1 py-3.5 px-4 rounded-xl bg-[#1F3A93] hover:bg-[#162B6E] disabled:opacity-75 text-white font-bold text-sm shadow-lg shadow-[#1F3A93]/20 flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
+                  >
+                    <Lock className="w-4 h-4" />
+                    <span>
+                      {isProcessingPaystack
+                        ? 'Connecting to Paystack...'
+                        : `Pay ${formatNaira(total)} with Paystack`}
+                    </span>
+                  </button>
+
+                  {isProcessingPaystack && (
+                    <button
+                      type="button"
+                      onClick={cleanupPaystackIframes}
+                      className="py-3.5 px-3 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold transition-colors"
+                      title="Cancel loader"
+                    >
+                      Cancel
+                    </button>
+                  )}
                 </div>
-              ) : (
-                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-slate-700 text-xs space-y-1">
-                  <p className="font-semibold text-slate-800">
-                    Online payment coming soon - order on WhatsApp.
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    You can still place your order instantly with our store team via WhatsApp below.
-                  </p>
-                </div>
-              )}
+
+                <p className="text-[11px] text-slate-400 text-center">
+                  Secured with 256-bit encryption by Paystack.
+                </p>
+              </div>
 
               {/* Option B: WhatsApp Order */}
               <div className="p-5 rounded-2xl border border-emerald-200 bg-emerald-50/50 space-y-3">

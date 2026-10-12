@@ -1,26 +1,23 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import crypto from 'crypto'
+import { computeOrderTotal } from './api/_lib/products'
+import { saveOrder, getOrder, updateOrderStatus, StoredOrder } from './api/_lib/orderStore'
+import { sendOrderPaidEmail } from './api/_lib/email'
 
-const PRODUCT_PRICES: Record<string, number> = {
-  '1': 12500,
-  '2': 15000,
-  '3': 18500,
-  '4': 32000,
-  '5': 28000,
-  '6': 35000,
-  '7': 8500,
-  '8': 9500,
-};
-
-const LAGOS_DELIVERY_FEE = 2500;
-
-function sanitizeText(val: any, maxLen = 120): string {
-  if (typeof val !== 'string') return '';
+function sanitizeText(val: unknown, maxLen = 120): string {
+  if (typeof val !== 'string') return ''
   return val
     .replace(/[<>'"`;]/g, '')
     .trim()
-    .slice(0, maxLen);
+    .slice(0, maxLen)
+}
+
+function generateServerReference(): string {
+  const timestamp = Date.now()
+  const randomSuffix = crypto.randomBytes(4).toString('hex').toUpperCase()
+  return `ADR-${timestamp}-${randomSuffix}`
 }
 
 // https://vite.dev/config/
@@ -35,8 +32,10 @@ export default defineConfig(({ mode }) => {
         name: 'api-dev-server',
         configureServer(server) {
           server.middlewares.use(async (req, res, next) => {
-            // Handle /api/initialize
-            if (req.url?.startsWith('/api/initialize')) {
+            const urlPath = req.url ? req.url.split('?')[0] : ''
+
+            // 1. Handle /api/initialize
+            if (urlPath === '/api/initialize') {
               if (req.method !== 'POST') {
                 res.writeHead(405, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ status: false, message: 'Method not allowed. Use POST.' }))
@@ -55,56 +54,63 @@ export default defineConfig(({ mode }) => {
                     return
                   }
 
+                  const { customer, items, callbackUrl } = data
+
+                  if (!customer || typeof customer !== 'object') {
+                    res.writeHead(400, { 'Content-Type': 'application/json' })
+                    res.end(JSON.stringify({ status: false, message: 'Customer details are required.' }))
+                    return
+                  }
+
                   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-                  const cleanEmail = typeof data.email === 'string' ? data.email.trim().toLowerCase() : ''
-                  if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+                  const rawEmail = typeof customer.email === 'string' ? customer.email.trim().toLowerCase() : ''
+                  if (!rawEmail || !emailRegex.test(rawEmail)) {
                     res.writeHead(400, { 'Content-Type': 'application/json' })
                     res.end(JSON.stringify({ status: false, message: 'A valid email address is required.' }))
                     return
                   }
 
-                  // Price integrity check
-                  let authoritativeAmountKobo = 0
-                  if (Array.isArray(data.items) && data.items.length > 0) {
-                    let subtotal = 0
-                    for (const item of data.items) {
-                      const pid = String(item.id || item.productId || '')
-                      const price = PRODUCT_PRICES[pid]
-                      if (!price) {
-                        res.writeHead(400, { 'Content-Type': 'application/json' })
-                        res.end(JSON.stringify({ status: false, message: `Unknown product ID: ${sanitizeText(pid, 20)}` }))
-                        return
-                      }
-                      const qty = parseInt(item.quantity, 10)
-                      if (isNaN(qty) || qty < 1 || qty > 50) {
-                        res.writeHead(400, { 'Content-Type': 'application/json' })
-                        res.end(JSON.stringify({ status: false, message: 'Invalid item quantity.' }))
-                        return
-                      }
-                      subtotal += price * qty
-                    }
-                    authoritativeAmountKobo = (subtotal + LAGOS_DELIVERY_FEE) * 100
-                  } else {
-                    const parsedAmount = parseInt(data.amount, 10)
-                    if (isNaN(parsedAmount) || parsedAmount < 100000 || parsedAmount > 50000000) {
-                      res.writeHead(400, { 'Content-Type': 'application/json' })
-                      res.end(JSON.stringify({ status: false, message: 'Invalid transaction amount.' }))
-                      return
-                    }
-                    authoritativeAmountKobo = parsedAmount
+                  const cleanCustomer = {
+                    fullName: sanitizeText(customer.fullName || customer.name, 80),
+                    email: rawEmail,
+                    phone: sanitizeText(customer.phone, 20),
+                    address: sanitizeText(customer.address, 200),
+                    note: sanitizeText(customer.note, 200),
                   }
 
-                  const refRegex = /^[A-Za-z0-9_-]{6,64}$/
-                  const safeReference = (data.reference && refRegex.test(data.reference))
-                    ? data.reference
-                    : `ADR-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
-
-                  const safeCustomer = {
-                    fullName: sanitizeText(data.customer?.fullName, 80),
-                    phone: sanitizeText(data.customer?.phone, 20),
-                    address: sanitizeText(data.customer?.address, 200),
-                    note: sanitizeText(data.customer?.note, 200),
+                  if (!cleanCustomer.fullName || cleanCustomer.fullName.length < 2) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' })
+                    res.end(JSON.stringify({ status: false, message: 'Customer full name is required.' }))
+                    return
                   }
+
+                  // Authoritative Server-side Price Computation
+                  let computedPrice
+                  try {
+                    computedPrice = computeOrderTotal(items)
+                  } catch (err: any) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' })
+                    res.end(JSON.stringify({ status: false, message: err.message || 'Invalid items' }))
+                    return
+                  }
+
+                  const reference = generateServerReference()
+
+                  // Store order with status 'pending'
+                  const newOrder: StoredOrder = {
+                    reference,
+                    items: computedPrice.items,
+                    subtotalNaira: computedPrice.subtotalNaira,
+                    deliveryFeeNaira: computedPrice.deliveryFeeNaira,
+                    totalNaira: computedPrice.totalNaira,
+                    totalKobo: computedPrice.totalKobo,
+                    customer: cleanCustomer,
+                    status: 'pending',
+                    createdAt: new Date().toISOString(),
+                  }
+                  await saveOrder(newOrder)
+
+                  const safeCallbackUrl = callbackUrl || `http://${req.headers.host || 'localhost:5173'}/confirmation`
 
                   const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
                     method: 'POST',
@@ -113,39 +119,34 @@ export default defineConfig(({ mode }) => {
                       'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                      email: cleanEmail,
-                      amount: authoritativeAmountKobo,
-                      reference: safeReference,
-                      callback_url: data.callbackUrl,
+                      email: cleanCustomer.email,
+                      amount: computedPrice.totalKobo,
+                      reference,
+                      callback_url: safeCallbackUrl,
                       metadata: {
                         custom_fields: [
-                          {
-                            display_name: 'Customer Name',
-                            variable_name: 'customer_name',
-                            value: safeCustomer.fullName || 'Adire Customer',
-                          },
-                          {
-                            display_name: 'Phone',
-                            variable_name: 'phone',
-                            value: safeCustomer.phone || 'N/A',
-                          },
-                          {
-                            display_name: 'Delivery Address',
-                            variable_name: 'delivery_address',
-                            value: safeCustomer.address || 'Lagos, Nigeria',
-                          },
-                          {
-                            display_name: 'Order Note',
-                            variable_name: 'order_note',
-                            value: safeCustomer.note || 'None',
-                          },
+                          { display_name: 'Customer Name', variable_name: 'customer_name', value: cleanCustomer.fullName },
+                          { display_name: 'Phone', variable_name: 'phone', value: cleanCustomer.phone },
+                          { display_name: 'Delivery Address', variable_name: 'delivery_address', value: cleanCustomer.address },
+                          { display_name: 'Order Note', variable_name: 'order_note', value: cleanCustomer.note || 'None' },
                         ],
                       },
                     }),
                   })
+
                   const result = await paystackRes.json()
-                  res.writeHead(paystackRes.status, { 'Content-Type': 'application/json' })
-                  res.end(JSON.stringify(result))
+                  if (!paystackRes.ok || !result.status || !result.data?.authorization_url) {
+                    res.writeHead(paystackRes.status || 502, { 'Content-Type': 'application/json' })
+                    res.end(JSON.stringify({ status: false, message: result.message || 'Paystack initialization failed' }))
+                    return
+                  }
+
+                  res.writeHead(200, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({
+                    status: true,
+                    authorization_url: result.data.authorization_url,
+                    reference,
+                  }))
                 } catch (e: any) {
                   res.writeHead(500, { 'Content-Type': 'application/json' })
                   res.end(JSON.stringify({ status: false, message: 'Internal server error' }))
@@ -154,24 +155,42 @@ export default defineConfig(({ mode }) => {
               return
             }
 
-            // Handle /api/verify
-            if (req.url?.startsWith('/api/verify')) {
+            // 2. Handle /api/verify (accepts ONLY ?reference=)
+            if (urlPath === '/api/verify') {
+              if (req.method !== 'GET') {
+                res.writeHead(405, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ verified: false, status: 'method_not_allowed' }))
+                return
+              }
+
               try {
-                const url = new URL(req.url, 'http://localhost')
-                const reference = url.searchParams.get('reference')
-                const expectedAmount = url.searchParams.get('expectedAmount')
+                const url = new URL(req.url || '', 'http://localhost')
+                const reference = (url.searchParams.get('reference') || '').trim()
 
                 const refRegex = /^[A-Za-z0-9_-]{6,64}$/
                 if (!reference || !refRegex.test(reference)) {
                   res.writeHead(400, { 'Content-Type': 'application/json' })
-                  res.end(JSON.stringify({ status: false, message: 'Invalid reference format.' }))
+                  res.end(JSON.stringify({ verified: false, status: 'invalid_reference' }))
+                  return
+                }
+
+                const storedOrder = await getOrder(reference)
+                if (!storedOrder) {
+                  res.writeHead(404, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({ verified: false, status: 'order_not_found' }))
+                  return
+                }
+
+                if (storedOrder.status === 'paid') {
+                  res.writeHead(200, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({ verified: true, status: 'success' }))
                   return
                 }
 
                 const secretKey = env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_SECRET_KEY
                 if (!secretKey) {
                   res.writeHead(503, { 'Content-Type': 'application/json' })
-                  res.end(JSON.stringify({ status: false, message: 'PAYSTACK_SECRET_KEY is not set in .env' }))
+                  res.end(JSON.stringify({ verified: false, status: 'server_configuration_error' }))
                   return
                 }
 
@@ -183,50 +202,97 @@ export default defineConfig(({ mode }) => {
                 })
                 const result = await paystackRes.json()
 
-                if (!paystackRes.ok || !result.status) {
-                  res.writeHead(paystackRes.status, { 'Content-Type': 'application/json' })
-                  res.end(JSON.stringify({ status: false, verified: false, message: result.message }))
+                if (!paystackRes.ok || !result.status || !result.data) {
+                  res.writeHead(200, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({ verified: false, status: result.data?.status || 'failed' }))
                   return
                 }
 
-                const tx = result.data || {}
+                const tx = result.data
                 const isSuccess = tx.status === 'success'
                 const isNgn = tx.currency === 'NGN'
-                let amountMatches = true
-                if (expectedAmount) {
-                  const expectedKobo = parseInt(expectedAmount, 10)
-                  if (!isNaN(expectedKobo)) {
-                    amountMatches = tx.amount === expectedKobo
-                  }
+                const amountMatches = tx.amount === storedOrder.totalKobo
+
+                if (isSuccess && isNgn && amountMatches) {
+                  await updateOrderStatus(reference, 'paid', tx.paid_at || new Date().toISOString())
+                  res.writeHead(200, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({ verified: true, status: 'success' }))
+                } else {
+                  res.writeHead(200, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({ verified: false, status: tx.status || 'failed' }))
                 }
-
-                const verified = isSuccess && isNgn && amountMatches
-
-                res.writeHead(200, { 'Content-Type': 'application/json' })
-                res.end(JSON.stringify({
-                  status: true,
-                  verified,
-                  amountMatches,
-                  message: verified ? 'Payment successfully verified' : 'Payment verification failed',
-                  data: {
-                    id: tx.id,
-                    status: tx.status,
-                    reference: tx.reference,
-                    amount: tx.amount,
-                    currency: tx.currency,
-                    channel: tx.channel,
-                    gateway_response: tx.gateway_response,
-                    paid_at: tx.paid_at,
-                    customer: {
-                      email: tx.customer?.email,
-                      customer_code: tx.customer?.customer_code,
-                    },
-                  },
-                }))
               } catch (e: any) {
                 res.writeHead(500, { 'Content-Type': 'application/json' })
-                res.end(JSON.stringify({ status: false, message: 'Internal server error' }))
+                res.end(JSON.stringify({ verified: false, status: 'verification_error' }))
               }
+              return
+            }
+
+            // 3. Handle /api/paystack-webhook
+            if (urlPath === '/api/paystack-webhook') {
+              if (req.method !== 'POST') {
+                res.writeHead(405, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ status: false, message: 'Method not allowed. Use POST.' }))
+                return
+              }
+
+              let rawBody = ''
+              req.on('data', chunk => { rawBody += chunk })
+              req.on('end', async () => {
+                try {
+                  const secretKey = env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_SECRET_KEY
+                  if (!secretKey) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' })
+                    res.end(JSON.stringify({ status: false, message: 'PAYSTACK_SECRET_KEY not set' }))
+                    return
+                  }
+
+                  const signature = req.headers['x-paystack-signature']
+                  if (!signature || typeof signature !== 'string') {
+                    res.writeHead(401, { 'Content-Type': 'application/json' })
+                    res.end(JSON.stringify({ status: false, message: 'Missing signature' }))
+                    return
+                  }
+
+                  const hash = crypto.createHmac('sha512', secretKey).update(rawBody).digest('hex')
+                  if (hash !== signature) {
+                    res.writeHead(401, { 'Content-Type': 'application/json' })
+                    res.end(JSON.stringify({ status: false, message: 'Invalid signature' }))
+                    return
+                  }
+
+                  const eventPayload = JSON.parse(rawBody || '{}')
+                  const eventType = eventPayload?.event
+                  const tx = eventPayload?.data
+
+                  if (eventType === 'charge.success' && tx) {
+                    const reference = tx.reference
+                    if (reference) {
+                      const order = await getOrder(reference)
+                      if (order && order.status !== 'paid') {
+                        const isSuccess = tx.status === 'success'
+                        const isNgn = tx.currency === 'NGN'
+                        const amountMatches = tx.amount === order.totalKobo
+
+                        if (isSuccess && isNgn && amountMatches) {
+                          await updateOrderStatus(reference, 'paid', tx.paid_at || new Date().toISOString())
+                          try {
+                            await sendOrderPaidEmail(order)
+                          } catch (err) {
+                            console.error('[webhook-dev] Failed sending email:', err)
+                          }
+                        }
+                      }
+                    }
+                  }
+
+                  res.writeHead(200, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({ status: true, message: 'Webhook processed' }))
+                } catch (e: any) {
+                  res.writeHead(400, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({ status: false, message: 'Malformed webhook payload' }))
+                }
+              })
               return
             }
 

@@ -72,23 +72,15 @@ export const ConfirmationPage: React.FC<ConfirmationPageProps> = ({
 
     const verifyReference = async () => {
       try {
-        const expectedKobo = (order.total || 0) * 100;
         const response = await fetch(
-          `/api/verify?reference=${encodeURIComponent(order.reference)}&expectedAmount=${expectedKobo}`
+          `/api/verify?reference=${encodeURIComponent(order.reference)}`
         );
-        if (!response.ok) {
-          throw new Error('Verification endpoint error');
-        }
         const result = await response.json();
         if (isMounted) {
-          if (result.status && (result.verified === true || result.data?.status === 'success')) {
+          if (result.verified === true) {
             setVerificationStatus('verified');
             setOrder((prev) => (prev ? { ...prev, status: 'paid' } : null));
-          } else if (
-            result.data?.status === 'failed' ||
-            result.data?.status === 'abandoned' ||
-            result.verified === false
-          ) {
+          } else if (result.status === 'order_not_found' || result.verified === false) {
             setVerificationStatus('failed');
             setOrder((prev) => (prev ? { ...prev, status: 'failed' } : null));
           } else {

@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /confirmation
+
+Sitemap: https://adireandco.com/sitemap.xml
