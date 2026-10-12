@@ -1,0 +1,74 @@
+[
+  {
+    "id": "1",
+    "name": "Classic Indigo Adire Fabric (2 yards)",
+    "category": "Fabrics",
+    "price": 12500,
+    "description": "Hand-dyed cotton in deep indigo with a traditional tie-dye pattern.",
+    "featured": true,
+    "image": "/images/products/classic-indigo-fabric.jpg"
+  },
+  {
+    "id": "2",
+    "name": "Eleko Pattern Adire Fabric (2 yards)",
+    "category": "Fabrics",
+    "price": 15000,
+    "description": "Starch-resist eleko design, dyed by hand in Abeokuta.",
+    "featured": false,
+    "image": "/images/products/eleko-pattern-fabric.jpg"
+  },
+  {
+    "id": "3",
+    "name": "Adire Short-Sleeve Shirt",
+    "category": "Men",
+    "price": 18500,
+    "description": "Relaxed fit, breathable cotton, perfect for Fridays and weekends.",
+    "featured": true,
+    "image": "/images/products/adire-mens-shirt.jpg"
+  },
+  {
+    "id": "4",
+    "name": "Men's Adire Kaftan",
+    "category": "Men",
+    "price": 32000,
+    "description": "Full-length kaftan with embroidered neckline.",
+    "featured": false,
+    "image": "/images/products/mens-adire-kaftan.jpg"
+  },
+  {
+    "id": "5",
+    "name": "Adire Wrap Dress",
+    "category": "Women",
+    "price": 28000,
+    "description": "Flattering wrap cut with a tie waist, from office to owambe.",
+    "featured": true,
+    "image": "/images/products/adire-wrap-dress.jpg"
+  },
+  {
+    "id": "6",
+    "name": "Adire Two-Piece Set",
+    "category": "Women",
+    "price": 35000,
+    "description": "Crop top and wide-leg trousers in matching indigo print.",
+    "featured": false,
+    "image": "/images/products/adire-two-piece-set.jpg"
+  },
+  {
+    "id": "7",
+    "name": "Adire Silk Scarf",
+    "category": "Accessories",
+    "price": 8500,
+    "description": "Soft silk-blend scarf, wear it as a headwrap or neck scarf.",
+    "featured": true,
+    "image": "/images/products/adire-silk-scarf.jpg"
+  },
+  {
+    "id": "8",
+    "name": "Adire Canvas Tote Bag",
+    "category": "Accessories",
+    "price": 9500,
+    "description": "Sturdy tote with an adire panel and inner pocket.",
+    "featured": false,
+    "image": "/images/products/adire-canvas-tote.jpg"
+  }
+]
