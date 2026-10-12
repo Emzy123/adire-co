@@ -32,5 +32,5 @@ export interface Order {
   total: number;
   customer: CustomerInfo;
   createdAt: string;
-  status: 'paid' | 'pending' | 'verified';
+  status: 'paid' | 'pending' | 'verified' | 'failed';
 }

@@ -177,7 +177,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
       total,
       customer: { ...formData },
       createdAt: new Date().toISOString(),
-      status: 'paid',
+      status: 'pending',
     };
 
     // Save order in localStorage for redirect safety
@@ -193,6 +193,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
       amount: total * 100,
       reference,
       customer: formData,
+      items: items.map((i) => ({ id: i.product.id, quantity: i.quantity })),
     });
 
     const authUrl = initResult?.data?.authorization_url || null;

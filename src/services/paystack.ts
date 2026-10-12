@@ -36,6 +36,7 @@ export const initializePaystackApi = async (params: {
   callbackUrl?: string;
   customer?: any;
   metadata?: any;
+  items?: Array<{ id: string; quantity: number }>;
 }): Promise<PaystackInitResponse | null> => {
   try {
     const res = await fetch('/api/initialize', {
@@ -50,6 +51,7 @@ export const initializePaystackApi = async (params: {
         callbackUrl: params.callbackUrl || `${window.location.origin}/confirmation`,
         customer: params.customer,
         metadata: params.metadata,
+        items: params.items,
       }),
     });
 
